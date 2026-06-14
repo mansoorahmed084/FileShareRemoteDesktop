@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+*.pem
+*.key
+*.cert
+.DS_Store
+Thumbs.db
