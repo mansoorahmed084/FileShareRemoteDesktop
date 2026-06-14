@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""
+RemoteDesktop — Setup & Run Script
+
+Usage:
+  python setup.py              # Install deps + run server
+  python setup.py --setup      # Install deps only
+  python setup.py --run        # Run server only (skip install)
+  python setup.py --tls        # Generate TLS cert, install deps, run with TLS
+  python setup.py --test       # Install deps + run tests
+  python setup.py --docker     # Build and run via Docker Compose
+  python setup.py --extension  # Build the Chrome extension
+"""
+
+import argparse
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import venv
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+SERVER_DIR = ROOT / "server"
+EXTENSION_DIR = ROOT / "extension"
+VENV_DIR = SERVER_DIR / ".venv"
+REQUIREMENTS = SERVER_DIR / "requirements.txt"
+
+IS_WIN = platform.system() == "Windows"
+PYTHON_BIN = VENV_DIR / ("Scripts" if IS_WIN else "bin") / ("python.exe" if IS_WIN else "python")
+PIP_BIN = VENV_DIR / ("Scripts" if IS_WIN else "bin") / ("pip.exe" if IS_WIN else "pip")
+
+
+def log(msg: str) -> None:
+    print(f"\n{'='*60}\n  {msg}\n{'='*60}")
+
+
+def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> int:
+    merged_env = {**os.environ, **(env or {})}
+    result = subprocess.run(cmd, cwd=cwd, env=merged_env)
+    return result.returncode
+
+
+def check_python_version() -> None:
+    if sys.version_info < (3, 11):
+        print(f"Python 3.11+ required. You have {sys.version}")
+        sys.exit(1)
+
+
+def create_venv() -> None:
+    if VENV_DIR.exists():
+        print(f"  Virtual environment exists: {VENV_DIR}")
+        return
+    log("Creating virtual environment")
+    venv.create(str(VENV_DIR), with_pip=True)
+    print(f"  Created: {VENV_DIR}")
+
+
+def install_server_deps(include_test: bool = False) -> None:
+    log("Installing server dependencies")
+    rc = run([str(PIP_BIN), "install", "-r", str(REQUIREMENTS), "--quiet"])
+    if rc != 0:
+        print("  Failed to install dependencies")
+        sys.exit(1)
+    if include_test:
+        run([str(PIP_BIN), "install", "pytest", "pytest-asyncio", "--quiet"])
+    print("  Done")
+
+
+def generate_tls_cert() -> None:
+    log("Generating self-signed TLS certificate")
+    cert_path = SERVER_DIR / "cert.pem"
+    key_path = SERVER_DIR / "key.pem"
+    if cert_path.exists() and key_path.exists():
+        print(f"  Certificates already exist: {cert_path}")
+        return
+    rc = run(
+        [str(PYTHON_BIN), str(SERVER_DIR / "generate_cert.py"),
+         "--cert", str(cert_path), "--key", str(key_path)],
+        cwd=SERVER_DIR,
+    )
+    if rc != 0:
+        print("  Failed to generate certificates")
+        sys.exit(1)
+
+
+def run_server(tls: bool = False, host: str = "0.0.0.0", port: int = 8765) -> None:
+    log(f"Starting relay server on {host}:{port}" + (" (TLS)" if tls else ""))
+    print(f"  Server URL: {'wss' if tls else 'ws'}://localhost:{port}")
+    print(f"  Health:     http{'s' if tls else ''}://localhost:{port}/health")
+    print(f"  Press Ctrl+C to stop\n")
+
+    env = {}
+    if tls:
+        env["RD_TLS_CERT"] = str(SERVER_DIR / "cert.pem")
+        env["RD_TLS_KEY"] = str(SERVER_DIR / "key.pem")
+
+    cmd = [
+        str(PYTHON_BIN), "-m", "uvicorn", "app.main:app",
+        "--host", host,
+        "--port", str(port),
+        "--reload",
+    ]
+    if tls:
+        cmd += ["--ssl-certfile", str(SERVER_DIR / "cert.pem")]
+        cmd += ["--ssl-keyfile", str(SERVER_DIR / "key.pem")]
+
+    try:
+        run(cmd, cwd=SERVER_DIR, env=env)
+    except KeyboardInterrupt:
+        print("\n  Server stopped.")
+
+
+def run_tests() -> None:
+    log("Running server tests")
+    rc = run(
+        [str(PYTHON_BIN), "-m", "pytest", "tests/", "-v"],
+        cwd=SERVER_DIR,
+    )
+    sys.exit(rc)
+
+
+def build_extension() -> None:
+    log("Building Chrome extension")
+    npm = shutil.which("npm")
+    if not npm:
+        print("  npm not found. Install Node.js first.")
+        sys.exit(1)
+
+    if not (EXTENSION_DIR / "node_modules").exists():
+        print("  Installing npm dependencies...")
+        rc = run([npm, "install"], cwd=EXTENSION_DIR)
+        if rc != 0:
+            print("  npm install failed")
+            sys.exit(1)
+
+    print("  Building...")
+    rc = run([npm, "run", "build"], cwd=EXTENSION_DIR)
+    if rc != 0:
+        print("  Build failed")
+        sys.exit(1)
+
+    print(f"\n  Extension built: {EXTENSION_DIR / 'dist'}")
+    print("  Load it in Chrome:")
+    print("    1. Open chrome://extensions/")
+    print("    2. Enable 'Developer mode'")
+    print("    3. Click 'Load unpacked'")
+    print(f"    4. Select: {EXTENSION_DIR / 'dist'}")
+
+
+def run_docker() -> None:
+    log("Starting with Docker Compose")
+    docker = shutil.which("docker")
+    if not docker:
+        print("  Docker not found. Install Docker first.")
+        sys.exit(1)
+    try:
+        run([docker, "compose", "up", "--build", "-d"], cwd=ROOT)
+        print("\n  Server running at ws://localhost:8765")
+        print("  Stop with: docker compose down")
+    except KeyboardInterrupt:
+        pass
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="RemoteDesktop — Setup & Run",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("--setup", action="store_true", help="Install dependencies only")
+    parser.add_argument("--run", action="store_true", help="Run server only (skip install)")
+    parser.add_argument("--tls", action="store_true", help="Generate TLS cert and run with TLS")
+    parser.add_argument("--test", action="store_true", help="Run server tests")
+    parser.add_argument("--docker", action="store_true", help="Run via Docker Compose")
+    parser.add_argument("--extension", action="store_true", help="Build Chrome extension")
+    parser.add_argument("--host", default="0.0.0.0", help="Server host (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
+
+    args = parser.parse_args()
+
+    check_python_version()
+
+    if args.docker:
+        run_docker()
+        return
+
+    if args.extension:
+        build_extension()
+        return
+
+    if args.run:
+        run_server(tls=args.tls, host=args.host, port=args.port)
+        return
+
+    create_venv()
+
+    if args.test:
+        install_server_deps(include_test=True)
+        run_tests()
+        return
+
+    install_server_deps()
+
+    if args.setup:
+        log("Setup complete")
+        print(f"  Run the server:  python setup.py --run")
+        print(f"  Build extension: python setup.py --extension")
+        return
+
+    if args.tls:
+        generate_tls_cert()
+
+    run_server(tls=args.tls, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
