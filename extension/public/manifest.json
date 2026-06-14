@@ -3,7 +3,7 @@
   "name": "RemoteDesktop",
   "description": "Secure device bridge — share files and text between your devices",
   "version": "0.1.0",
-  "permissions": ["storage", "sidePanel", "notifications"],
+  "permissions": ["storage", "sidePanel", "notifications", "downloads"],
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"

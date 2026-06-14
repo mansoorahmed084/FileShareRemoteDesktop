@@ -8,6 +8,7 @@ import {
   generateVerificationEmojis,
   type KeyPairData,
 } from "../lib/crypto";
+import { FileReceiver, type FileMetadata, type TransferProgress } from "../lib/file-transfer";
 import type { WSMessage, ConnectionStatus, PairedDevice } from "../lib/types";
 
 let currentStatus: ConnectionStatus = "disconnected";
@@ -17,6 +18,9 @@ const pendingKeyExchange = new Map<
   { keyPair: KeyPairData; peerPublicKey?: JsonWebKey }
 >();
 const sharedKeys = new Map<string, CryptoKey>();
+const activeReceivers = new Map<string, FileReceiver>();
+const receiveProgress = new Map<string, TransferProgress>();
+const receivedBlobs = new Map<string, Blob>();
 
 async function init() {
   const config = await getConfig();
@@ -43,7 +47,6 @@ async function init() {
         };
         await addPairedDevice(device);
         broadcastToExtension({ type: "pair_accept", device });
-
         await initiateKeyExchange(msg.from_device);
         break;
       }
@@ -61,15 +64,9 @@ async function init() {
         const pending = pendingKeyExchange.get(msg.from_device);
         if (pending) {
           pending.peerPublicKey = peerPublicKey;
-          const sharedKey = await deriveSharedKey(
-            pending.keyPair.privateKey,
-            peerPublicKey
-          );
+          const sharedKey = await deriveSharedKey(pending.keyPair.privateKey, peerPublicKey);
           sharedKeys.set(msg.from_device, sharedKey);
-          const emojis = await generateVerificationEmojis(
-            pending.keyPair.publicKey,
-            peerPublicKey
-          );
+          const emojis = await generateVerificationEmojis(pending.keyPair.publicKey, peerPublicKey);
           broadcastToExtension({
             type: "verification_emojis",
             device_id: msg.from_device,
@@ -78,10 +75,7 @@ async function init() {
           pendingKeyExchange.delete(msg.from_device);
         } else {
           const keyPair = await generateKeyPair();
-          const sharedKey = await deriveSharedKey(
-            keyPair.privateKey,
-            peerPublicKey
-          );
+          const sharedKey = await deriveSharedKey(keyPair.privateKey, peerPublicKey);
           sharedKeys.set(msg.from_device, sharedKey);
 
           const cfg = await getConfig();
@@ -92,10 +86,7 @@ async function init() {
             payload: { publicKey: keyPair.publicKey },
           });
 
-          const emojis = await generateVerificationEmojis(
-            keyPair.publicKey,
-            peerPublicKey
-          );
+          const emojis = await generateVerificationEmojis(keyPair.publicKey, peerPublicKey);
           broadcastToExtension({
             type: "verification_emojis",
             device_id: msg.from_device,
@@ -123,10 +114,7 @@ async function init() {
                 timestamp: msg.timestamp,
               });
             } catch {
-              broadcastToExtension({
-                type: "error",
-                payload: "Failed to decrypt message",
-              });
+              broadcastToExtension({ type: "error", payload: "Failed to decrypt message" });
             }
           }
         } else {
@@ -136,6 +124,96 @@ async function init() {
             text: (textPayload?.text as string) || "",
             timestamp: msg.timestamp,
           });
+        }
+        break;
+      }
+
+      case "file_meta": {
+        if (!msg.from_device) break;
+        const meta = msg.payload as unknown as FileMetadata;
+        const key = sharedKeys.get(msg.from_device) || null;
+        const receiver = new FileReceiver(meta, key);
+        activeReceivers.set(meta.transferId, receiver);
+        receiveProgress.set(meta.transferId, {
+          transferId: meta.transferId,
+          fileName: meta.fileName,
+          fileSize: meta.fileSize,
+          totalChunks: meta.totalChunks,
+          completedChunks: 0,
+          direction: "receive",
+          status: "active",
+          startTime: Date.now(),
+        });
+
+        const cfg = await getConfig();
+        wsClient.send({
+          type: "file_ack",
+          from_device: cfg.deviceId,
+          to_device: msg.from_device,
+          payload: { transferId: meta.transferId, status: "ready" },
+        });
+
+        broadcastToExtension({
+          type: "transfer_update",
+          transfer: receiveProgress.get(meta.transferId),
+        });
+        break;
+      }
+
+      case "file_chunk": {
+        if (!msg.from_device) break;
+        const chunkPayload = msg.payload as Record<string, unknown>;
+        const transferId = chunkPayload.transferId as string;
+        const chunkIndex = chunkPayload.index as number;
+        const chunkData = chunkPayload.data as string;
+        const chunkNonce = chunkPayload.nonce as string;
+
+        const receiver = activeReceivers.get(transferId);
+        const progress = receiveProgress.get(transferId);
+        if (!receiver || !progress) break;
+
+        try {
+          await receiver.addChunk(chunkIndex, chunkData, chunkNonce);
+          progress.completedChunks = chunkIndex + 1;
+
+          if (receiver.isComplete) {
+            const { blob, verified } = await receiver.assemble();
+            receivedBlobs.set(transferId, blob);
+            progress.status = "complete";
+            if (!verified) {
+              progress.error = "Hash mismatch — file may be corrupted";
+            }
+            activeReceivers.delete(transferId);
+          }
+
+          broadcastToExtension({ type: "transfer_update", transfer: { ...progress } });
+        } catch (err) {
+          progress.status = "failed";
+          progress.error = String(err);
+          activeReceivers.delete(transferId);
+          broadcastToExtension({ type: "transfer_update", transfer: { ...progress } });
+        }
+        break;
+      }
+
+      case "file_ack": {
+        const ackPayload = msg.payload as Record<string, unknown>;
+        broadcastToExtension({
+          type: "file_ack",
+          transferId: ackPayload.transferId,
+          status: ackPayload.status,
+        });
+        break;
+      }
+
+      case "file_cancel": {
+        const cancelPayload = msg.payload as Record<string, unknown>;
+        const tid = cancelPayload.transferId as string;
+        activeReceivers.delete(tid);
+        const prog = receiveProgress.get(tid);
+        if (prog) {
+          prog.status = "cancelled";
+          broadcastToExtension({ type: "transfer_update", transfer: { ...prog } });
         }
         break;
       }
@@ -168,7 +246,6 @@ async function init() {
 async function initiateKeyExchange(targetDeviceId: string) {
   const keyPair = await generateKeyPair();
   pendingKeyExchange.set(targetDeviceId, { keyPair });
-
   const config = await getConfig();
   wsClient.send({
     type: "key_exchange",
@@ -253,9 +330,77 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         break;
       }
 
+      case "send_file": {
+        const config = await getConfig();
+        const { to_device, meta, chunks } = message as {
+          to_device: string;
+          meta: FileMetadata;
+          chunks: { index: number; total: number; data: string; nonce: string }[];
+        };
+
+        wsClient.send({
+          type: "file_meta",
+          from_device: config.deviceId,
+          to_device,
+          payload: meta as unknown as Record<string, unknown>,
+          timestamp: Date.now() / 1000,
+        });
+
+        for (const chunk of chunks) {
+          wsClient.send({
+            type: "file_chunk",
+            from_device: config.deviceId,
+            to_device,
+            payload: {
+              transferId: meta.transferId,
+              index: chunk.index,
+              total: chunk.total,
+              data: chunk.data,
+              nonce: chunk.nonce,
+            },
+            timestamp: Date.now() / 1000,
+          });
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case "cancel_transfer": {
+        const config = await getConfig();
+        wsClient.send({
+          type: "file_cancel",
+          from_device: config.deviceId,
+          to_device: message.to_device,
+          payload: { transferId: message.transferId },
+        });
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case "download_received": {
+        const blob = receivedBlobs.get(message.transferId);
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          await chrome.downloads.download({
+            url,
+            filename: message.fileName,
+            saveAs: true,
+          });
+          sendResponse({ ok: true });
+        } else {
+          sendResponse({ error: "File not found" });
+        }
+        break;
+      }
+
       case "get_paired_devices": {
         const devices = await getPairedDevices();
         sendResponse({ devices });
+        break;
+      }
+
+      case "get_transfers": {
+        sendResponse({ transfers: Array.from(receiveProgress.values()) });
         break;
       }
 

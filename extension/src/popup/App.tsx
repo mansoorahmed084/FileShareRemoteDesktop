@@ -1,13 +1,17 @@
 import { useEffect, useState, useCallback } from "react";
 import type { ConnectionStatus, PairedDevice } from "../lib/types";
 import type { TextMessage } from "../components/TextShare";
+import type { TransferProgress } from "../lib/file-transfer";
+import { chunkFile, createFileMetadata, hashFile } from "../lib/file-transfer";
 import { getConfig, saveConfig } from "../lib/storage";
 import { StatusBadge } from "../components/StatusBadge";
 import { PairingDialog } from "../components/PairingDialog";
 import { DeviceList } from "../components/DeviceList";
 import { TextShare } from "../components/TextShare";
+import { FileDropZone } from "../components/FileDropZone";
+import { TransferProgressList } from "../components/TransferProgress";
 
-type Tab = "devices" | "text" | "settings";
+type Tab = "devices" | "text" | "files" | "settings";
 
 export default function App() {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -23,6 +27,7 @@ export default function App() {
   const [verificationEmojis, setVerificationEmojis] = useState<string | null>(null);
   const [verificationDeviceId, setVerificationDeviceId] = useState<string | null>(null);
   const [messages, setMessages] = useState<TextMessage[]>([]);
+  const [transfers, setTransfers] = useState<TransferProgress[]>([]);
 
   const loadDevices = useCallback(() => {
     chrome.runtime.sendMessage({ type: "get_paired_devices" }, (res) => {
@@ -91,6 +96,18 @@ export default function App() {
           setMessages((prev) => [...prev, newMsg]);
           break;
         }
+        case "transfer_update":
+          setTransfers((prev) => {
+            const t = message.transfer as TransferProgress;
+            const idx = prev.findIndex((x) => x.transferId === t.transferId);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = t;
+              return next;
+            }
+            return [...prev, t];
+          });
+          break;
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -125,11 +142,59 @@ export default function App() {
     ]);
   };
 
+  const handleSendFiles = async (files: File[]) => {
+    if (!selectedDeviceId) return;
+    for (const file of files) {
+      const meta = createFileMetadata(file);
+      const arrayBuffer = await file.arrayBuffer();
+      const sha256 = await hashFile(arrayBuffer);
+      const fullMeta = { ...meta, sha256 };
+
+      const transfer: TransferProgress = {
+        transferId: meta.transferId,
+        fileName: file.name,
+        fileSize: file.size,
+        totalChunks: meta.totalChunks,
+        completedChunks: 0,
+        direction: "send",
+        status: "active",
+        startTime: Date.now(),
+      };
+      setTransfers((prev) => [...prev, transfer]);
+
+      const allChunks: { index: number; total: number; data: string; nonce: string }[] = [];
+      for await (const chunk of chunkFile(file, null)) {
+        allChunks.push(chunk);
+        setTransfers((prev) =>
+          prev.map((t) =>
+            t.transferId === meta.transferId
+              ? { ...t, completedChunks: chunk.index + 1 }
+              : t
+          )
+        );
+      }
+
+      chrome.runtime.sendMessage({
+        type: "send_file",
+        to_device: selectedDeviceId,
+        meta: fullMeta,
+        chunks: allChunks,
+      });
+
+      setTransfers((prev) =>
+        prev.map((t) =>
+          t.transferId === meta.transferId ? { ...t, status: "complete" } : t
+        )
+      );
+    }
+  };
+
   const selectedDevice = devices.find((d) => d.device_id === selectedDeviceId);
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "devices", label: "Devices" },
     { id: "text", label: "Text" },
+    { id: "files", label: "Files" },
     { id: "settings", label: "Settings" },
   ];
 
@@ -251,6 +316,48 @@ export default function App() {
                 onSend={handleSendText}
                 disabled={!selectedDeviceId || !selectedDevice?.is_online}
               />
+            )}
+
+            {activeTab === "files" && (
+              <div className="space-y-4">
+                <FileDropZone
+                  onFilesSelected={handleSendFiles}
+                  disabled={!selectedDeviceId || !selectedDevice?.is_online}
+                  maxFileSize={104857600}
+                />
+                <TransferProgressList
+                  transfers={transfers}
+                  onCancel={(transferId) => {
+                    chrome.runtime.sendMessage({
+                      type: "cancel_transfer",
+                      transferId,
+                      to_device: selectedDeviceId,
+                    });
+                    setTransfers((prev) =>
+                      prev.map((t) =>
+                        t.transferId === transferId
+                          ? { ...t, status: "cancelled" as const }
+                          : t
+                      )
+                    );
+                  }}
+                  onDownload={(transferId) => {
+                    const t = transfers.find((x) => x.transferId === transferId);
+                    if (t) {
+                      chrome.runtime.sendMessage({
+                        type: "download_received",
+                        transferId,
+                        fileName: t.fileName,
+                      });
+                    }
+                  }}
+                />
+                {!selectedDeviceId && (
+                  <p className="text-xs text-gray-400 text-center">
+                    Select a device in the Devices tab first
+                  </p>
+                )}
+              </div>
             )}
 
             {activeTab === "settings" && (
