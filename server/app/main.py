@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .hub import hub
+from .middleware import RateLimitMiddleware, RequestSizeLimitMiddleware
 from .models import WSMessage
 from .registry import registry
 
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="RemoteDesktop Relay Server", version="0.1.0")
 
+app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
+app.add_middleware(RequestSizeLimitMiddleware, max_body_size=settings.MAX_MESSAGE_SIZE)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -187,11 +190,27 @@ async def _handle_binary(device_id: str, data: bytes) -> None:
 
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
 
-    uvicorn.run(
-        "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=True,
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--generate-cert", action="store_true", help="Generate self-signed TLS cert and exit")
+    args = parser.parse_args()
+
+    if args.generate_cert:
+        from generate_cert import generate_self_signed_cert
+        generate_self_signed_cert()
+    else:
+        ssl_kwargs = {}
+        if settings.TLS_CERT and settings.TLS_KEY:
+            ssl_kwargs["ssl_certfile"] = settings.TLS_CERT
+            ssl_kwargs["ssl_keyfile"] = settings.TLS_KEY
+            logger.info("TLS enabled: %s", settings.TLS_CERT)
+
+        uvicorn.run(
+            "app.main:app",
+            host=settings.HOST,
+            port=settings.PORT,
+            reload=True,
+            **ssl_kwargs,
+        )
