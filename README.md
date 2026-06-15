@@ -3,10 +3,10 @@
 **Secure, encrypted device bridge for developers.** Share files, text, `.env` variables, and code snippets between your laptops instantly — no cloud, no accounts, no cost.
 
 ```
-Laptop A (Chrome) ◄──── WSS (E2E encrypted) ────► Relay Server ◄──── WSS ────► Laptop B (Chrome)
+Laptop A (Chrome/CLI/Agent) ◄──── WSS (E2E encrypted) ────► Relay Server ◄──── WSS ────► Laptop B (Chrome/CLI/Agent)
 ```
 
-RemoteDesktop is a **Chrome extension** paired with a **self-hosted Python relay server**. All data is end-to-end encrypted — the server is zero-knowledge and never sees your plaintext.
+RemoteDesktop is a **Chrome extension** + **CLI tool** + **MCP server** paired with a **self-hosted Python relay server**. All data is end-to-end encrypted — the server is zero-knowledge and never sees your plaintext.
 
 ---
 
@@ -33,6 +33,8 @@ RemoteDesktop is a **Chrome extension** paired with a **self-hosted Python relay
 | **Self-hosted** | Run on your LAN for free, or deploy to a VPS for cross-network use |
 | **Docker support** | One-command deployment with `docker compose up` |
 | **Zero accounts** | No sign-up, no login, no tracking — just device IDs and pairing codes |
+| **CLI tool** | Terminal-based sharing: `rdcli send`, `rdcli send-file`, `rdcli send-env`, `rdcli listen` |
+| **MCP server** | AI agent integration — Claude, Cursor, and other coding agents can send/receive files and text |
 
 ---
 
@@ -221,12 +223,14 @@ The relay server **never** knows:
 | Chrome Extension | TypeScript, React 18, Vite, Tailwind CSS |
 | Encryption (browser) | Web Crypto API (native, zero dependencies) |
 | Encryption (server) | `cryptography` library (for TLS cert generation only) |
+| CLI | Python, Click, Rich |
+| MCP Server | MCP SDK (Model Context Protocol), stdio transport |
 | Containerization | Docker, multi-stage build |
 
 ### Project structure
 
 ```
-myRemoteDesktop/
+FileShareRemoteDesktop/
 ├── server/                     # Python relay server
 │   ├── app/
 │   │   ├── main.py             # FastAPI app, WebSocket endpoint
@@ -250,6 +254,12 @@ myRemoteDesktop/
 │   │   └── lib/                # Crypto, WebSocket client, file transfer
 │   ├── public/                 # Manifest, icons
 │   └── dist/                   # Built extension (load this in Chrome)
+│
+├── cli/                        # CLI & MCP Server
+│   ├── client.py               # Shared WebSocket client library
+│   ├── rdcli.py                # Click-based CLI tool
+│   ├── mcp_server.py           # MCP server for AI agents
+│   └── requirements.txt
 │
 ├── docs/
 │   ├── design.md               # Full architecture document
@@ -314,6 +324,112 @@ services:
     ports:
       - "9000:9000"
 ```
+
+---
+
+## CLI Tool
+
+A terminal-based client for sharing text, files, and `.env` variables without Chrome.
+
+### Install
+
+```bash
+cd cli
+pip install -r requirements.txt
+```
+
+### Commands
+
+```bash
+# Connect and listen for incoming messages/files
+python rdcli.py connect --server ws://192.168.1.42:8765 --name "My Laptop"
+
+# Check config
+python rdcli.py status
+
+# Pair devices
+python rdcli.py pair create --server ws://192.168.1.42:8765
+python rdcli.py pair join 482910 --server ws://192.168.1.42:8765
+
+# Send text
+python rdcli.py send <device-id-or-name> "Hello from terminal"
+
+# Send a file
+python rdcli.py send-file <device-id-or-name> ./report.pdf
+
+# Send .env variables
+python rdcli.py send-env <device-id-or-name> ./.env
+
+# List paired devices
+python rdcli.py devices --server ws://192.168.1.42:8765
+
+# Listen and auto-save received files
+python rdcli.py listen --server ws://192.168.1.42:8765 --save-dir ./downloads
+```
+
+The CLI stores config at `~/.remote-desktop/config.json` — once connected, server URL and device name are remembered.
+
+---
+
+## MCP Server (AI Agent Integration)
+
+The MCP server lets AI coding agents (Claude Code, Claude Desktop, Cursor, etc.) send and receive files/text between paired devices.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `rd_list_devices` | List paired devices and their online/offline status |
+| `rd_send_text` | Send text, code snippets, or config to a device |
+| `rd_send_file` | Send a file (up to 100MB) to a device |
+| `rd_send_env_file` | Read and send a `.env` file to a device |
+| `rd_get_messages` | Get recent received text messages |
+| `rd_get_received_files` | List files received from other devices |
+| `rd_save_received_file` | Save a received file to disk |
+| `rd_pair_create` | Generate a 6-digit pairing code |
+| `rd_pair_join` | Join using a pairing code |
+| `rd_get_status` | Get connection status and device info |
+
+### Configure in Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "remote-desktop": {
+      "command": "python",
+      "args": ["/absolute/path/to/cli/mcp_server.py", "--server", "ws://192.168.1.42:8765"]
+    }
+  }
+}
+```
+
+### Configure in Claude Code
+
+Add to your Claude Code MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "remote-desktop": {
+      "command": "python",
+      "args": ["/absolute/path/to/cli/mcp_server.py", "--server", "ws://192.168.1.42:8765"]
+    }
+  }
+}
+```
+
+### Example Usage with Claude
+
+Once configured, you can ask Claude:
+
+> "Send my .env file to my work laptop"
+> "List my connected devices"
+> "Send this API key to Device B: sk-abc123..."
+> "Check if I received any files"
+
+The MCP server auto-connects to the relay on first tool call and reuses the connection for subsequent calls.
 
 ---
 
@@ -397,6 +513,8 @@ After rebuilding, go to `chrome://extensions/` and click the refresh icon on Rem
 
 ## Roadmap
 
+- [x] CLI tool for terminal-based sharing
+- [x] MCP server for AI agent integration
 - [ ] Mobile companion app (React Native)
 - [ ] WebRTC peer-to-peer mode for LAN (skip relay for faster transfers)
 - [ ] Folder watching and auto-sync
