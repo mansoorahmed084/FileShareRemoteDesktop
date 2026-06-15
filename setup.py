@@ -36,6 +36,29 @@ IS_WIN = platform.system() == "Windows"
 PYTHON_BIN = VENV_DIR / ("Scripts" if IS_WIN else "bin") / ("python.exe" if IS_WIN else "python")
 PIP_BIN = VENV_DIR / ("Scripts" if IS_WIN else "bin") / ("pip.exe" if IS_WIN else "pip")
 
+# pydantic-core requires pre-built wheels; Python 3.14+ is too new.
+# Prefer Python 3.12 or 3.13 when creating the venv on Windows.
+_PREFERRED_VERSIONS = ["3.12", "3.13"]
+
+
+def _find_python_for_venv() -> str:
+    """Return path to a Python interpreter compatible with all dependencies."""
+    if IS_WIN:
+        py = shutil.which("py")
+        if py:
+            for ver in _PREFERRED_VERSIONS:
+                try:
+                    r = subprocess.run(
+                        [py, f"-{ver}", "-c", "import sys; print(sys.executable)"],
+                        capture_output=True, text=True,
+                    )
+                    if r.returncode == 0:
+                        return r.stdout.strip()
+                except FileNotFoundError:
+                    pass
+    # Fall back to whatever python is on PATH
+    return sys.executable
+
 
 def log(msg: str) -> None:
     print(f"\n{'='*60}\n  {msg}\n{'='*60}")
@@ -58,7 +81,12 @@ def create_venv() -> None:
         print(f"  Virtual environment exists: {VENV_DIR}")
         return
     log("Creating virtual environment")
-    venv.create(str(VENV_DIR), with_pip=True)
+    python = _find_python_for_venv()
+    print(f"  Using interpreter: {python}")
+    rc = subprocess.run([python, "-m", "venv", str(VENV_DIR)]).returncode
+    if rc != 0:
+        print("  Failed to create virtual environment")
+        sys.exit(1)
     print(f"  Created: {VENV_DIR}")
 
 
