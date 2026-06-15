@@ -47,8 +47,8 @@ RemoteDesktop is a **Chrome extension** paired with a **self-hosted Python relay
 ### 1. Clone and set up
 
 ```bash
-git clone https://github.com/mansoorahmed084/myRemoteDesktop.git
-cd myRemoteDesktop
+git clone https://github.com/mansoorahmed084/FileShareRemoteDesktop.git
+cd FileShareRemoteDesktop
 python setup.py
 ```
 
