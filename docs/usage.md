@@ -244,7 +244,7 @@ On the machine whose screen you want to share:
 python -m screen host --server ws://192.168.1.42:8765
 ```
 
-This prints a **6-digit pairing code**. Give it to the viewer.
+A **pairing dialog** pops up showing a **6-digit code** in large text. Share this code with the viewer (read it aloud, send it over chat, etc.). The dialog auto-closes once the viewer connects.
 
 #### Host options
 
@@ -271,10 +271,14 @@ Press **Ctrl+C** to stop sharing.
 On the machine that wants to view:
 
 ```bash
-python -m screen view --server ws://192.168.1.42:8765 --code 847293
+python -m screen view --server ws://192.168.1.42:8765
 ```
 
-Replace `847293` with the 6-digit code from the host.
+A **pairing dialog** pops up asking for the 6-digit code. Enter the code from the host and click **Connect**. You can also pass the code directly on the command line to skip the dialog:
+
+```bash
+python -m screen view --server ws://192.168.1.42:8765 --code 847293
+```
 
 #### Viewer options
 
@@ -282,14 +286,14 @@ Replace `847293` with the 6-digit code from the host.
 |------|---------|-------------|
 | `--server`, `-s` | *(required)* | Relay server URL |
 | `--name`, `-n` | `Viewer` | Device name shown in logs |
-| `--code`, `-c` | *(required)* | 6-digit pairing code from host |
+| `--code`, `-c` | *(optional)* | 6-digit pairing code from host (GUI prompt if omitted) |
 | `--input` | off | Send mouse/keyboard events to host |
 | `--clipboard` | off | Enable bidirectional clipboard sync |
 
 #### Example: view with input control and clipboard sync
 
 ```bash
-python -m screen view -s ws://192.168.1.42:8765 -c 847293 --input --clipboard
+python -m screen view -s ws://192.168.1.42:8765 --input --clipboard
 ```
 
 ### Viewer keyboard shortcuts
@@ -303,7 +307,7 @@ python -m screen view -s ws://192.168.1.42:8765 -c 847293 --input --clipboard
 ### How it works
 
 1. Both host and viewer connect to the same relay server via WebSocket (signaling)
-2. Host generates a pairing code; viewer enters it to pair
+2. Host shows a pairing dialog with the code; viewer enters it in their own dialog (or via `--code`)
 3. WebRTC peer connection is established (video stream + data channel)
 4. Screen frames are captured (dxcam on Windows, mss fallback) and sent via WebRTC
 5. Mouse/keyboard events travel back via the WebRTC data channel
@@ -445,8 +449,9 @@ pip install -r screen/requirements.txt              # Install dependencies (once
 python -m screen monitors                           # List monitors
 python -m screen host -s ws://<ip>:8765             # Share your screen
 python -m screen host -s ws://<ip>:8765 --input --clipboard  # With remote control
-python -m screen view -s ws://<ip>:8765 -c <code>   # View remote screen
-python -m screen view -s ws://<ip>:8765 -c <code> --input --clipboard  # With control
+python -m screen view -s ws://<ip>:8765              # View (GUI asks for code)
+python -m screen view -s ws://<ip>:8765 -c <code>   # View (skip GUI, code on CLI)
+python -m screen view -s ws://<ip>:8765 --input --clipboard  # With control
 ```
 
 ### Connection checklist
