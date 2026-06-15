@@ -55,6 +55,9 @@ class DeviceRegistry:
             removed = True
         return removed
 
+    def restore_pair(self, device_a: str, device_b: str) -> None:
+        self._add_pair(device_a, device_b)
+
     def _add_pair(self, device_a: str, device_b: str) -> None:
         self._paired.setdefault(device_a, set()).add(device_b)
         self._paired.setdefault(device_b, set()).add(device_a)

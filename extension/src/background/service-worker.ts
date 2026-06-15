@@ -91,6 +91,13 @@ async function init() {
     broadcastToExtension({ type: "status_changed", status });
     if (status === "connected") {
       await startKeepAlive();
+      const devices = await getPairedDevices();
+      if (devices.length > 0) {
+        wsClient.send({
+          type: "restore_pairs",
+          payload: devices.map((d) => d.device_id),
+        });
+      }
     } else if (status === "disconnected") {
       // Don't stop keepalive on disconnect — let it try to reconnect
     }

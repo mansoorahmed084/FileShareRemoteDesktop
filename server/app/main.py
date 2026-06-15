@@ -149,6 +149,13 @@ async def _handle_message(device_id: str, msg: WSMessage) -> None:
                 await hub.send_to(device_id, {"type": "unpair_ack", "from_device": target})
                 await hub.send_to(target, {"type": "unpair_ack", "from_device": device_id})
 
+        case "restore_pairs":
+            device_ids = msg.payload if isinstance(msg.payload, list) else []
+            for pid in device_ids:
+                if isinstance(pid, str) and pid != device_id:
+                    registry.restore_pair(device_id, pid)
+            logger.info("Restored %d pairings for %s", len(device_ids), device_id)
+
         case _:
             if not msg.to_device:
                 await hub.send_to(device_id, {

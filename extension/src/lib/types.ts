@@ -2,7 +2,7 @@ export interface WSMessage {
   type: string;
   from_device?: string;
   to_device?: string;
-  payload?: Record<string, unknown> | string;
+  payload?: Record<string, unknown> | string[] | string;
   timestamp?: number;
   nonce?: string;
 }

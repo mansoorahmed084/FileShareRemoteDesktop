@@ -5,7 +5,7 @@ class WSMessage(BaseModel):
     type: str
     from_device: str | None = None
     to_device: str | None = None
-    payload: dict | str | None = None
+    payload: dict | list | str | None = None
     timestamp: float | None = None
     nonce: str | None = None
 
