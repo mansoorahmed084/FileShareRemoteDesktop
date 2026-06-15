@@ -2,7 +2,7 @@
 
 ## Overview
 
-RemoteDesktop lets you share text and files between two (or more) laptops through a Chrome extension connected to a self-hosted relay server. One laptop runs the relay server; all laptops run the Chrome extension.
+RemoteDesktop lets you share text, files, and your screen between two (or more) laptops through a Chrome extension and CLI tools connected to a self-hosted relay server. One laptop runs the relay server; all laptops run the Chrome extension. Screen sharing runs as a standalone Python CLI.
 
 ```
 ┌─────────────┐        ┌─────────────────┐        ┌─────────────┐
@@ -206,6 +206,119 @@ The receiver can click **Copy** to copy the entire block to their clipboard.
 
 ---
 
+## Step 8: Screen Sharing & Remote Control
+
+The `screen/` module lets you stream your screen to another device in real time, with optional remote mouse/keyboard control and clipboard sync. It runs as a standalone Python CLI — no Chrome extension needed for this part.
+
+### Install dependencies
+
+```bash
+cd myRemoteDesktop
+pip install -r screen/requirements.txt
+```
+
+Dependencies: `aiortc`, `websockets`, `mss`, `numpy`, `pygame`, `opencv-python-headless`.
+
+Optional (Windows, faster capture): `pip install dxcam`
+
+### List available monitors
+
+```bash
+python -m screen monitors
+```
+
+Output:
+
+```
+  Found 2 monitor(s):
+
+    [0] 1920x1080 at (0,0) (primary)
+    [1] 2560x1440 at (1920,0)
+```
+
+### Host (share your screen)
+
+On the machine whose screen you want to share:
+
+```bash
+python -m screen host --server ws://192.168.1.42:8765
+```
+
+This prints a **6-digit pairing code**. Give it to the viewer.
+
+#### Host options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--server`, `-s` | *(required)* | Relay server URL |
+| `--name`, `-n` | `Host` | Device name shown in logs |
+| `--fps` | `30` | Target frames per second |
+| `--monitor`, `-m` | `0` | Monitor index (see `monitors` command) |
+| `--scale` | `1.0` | Resolution scale (0.25--1.0). Lower = less bandwidth |
+| `--input` | off | Allow the viewer to control your mouse/keyboard |
+| `--clipboard` | off | Enable bidirectional clipboard sync |
+
+#### Example: share second monitor at half resolution with remote control
+
+```bash
+python -m screen host -s ws://192.168.1.42:8765 --monitor 1 --scale 0.5 --input --clipboard
+```
+
+Press **Ctrl+C** to stop sharing.
+
+### View (watch and control a remote screen)
+
+On the machine that wants to view:
+
+```bash
+python -m screen view --server ws://192.168.1.42:8765 --code 847293
+```
+
+Replace `847293` with the 6-digit code from the host.
+
+#### Viewer options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--server`, `-s` | *(required)* | Relay server URL |
+| `--name`, `-n` | `Viewer` | Device name shown in logs |
+| `--code`, `-c` | *(required)* | 6-digit pairing code from host |
+| `--input` | off | Send mouse/keyboard events to host |
+| `--clipboard` | off | Enable bidirectional clipboard sync |
+
+#### Example: view with input control and clipboard sync
+
+```bash
+python -m screen view -s ws://192.168.1.42:8765 -c 847293 --input --clipboard
+```
+
+### Viewer keyboard shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| **F11** or **Ctrl+Shift+F** | Toggle fullscreen |
+| **Ctrl+Shift+S** | Toggle stats overlay (FPS, resolution, connection state) |
+| **Esc** | Disconnect and quit |
+
+### How it works
+
+1. Both host and viewer connect to the same relay server via WebSocket (signaling)
+2. Host generates a pairing code; viewer enters it to pair
+3. WebRTC peer connection is established (video stream + data channel)
+4. Screen frames are captured (dxcam on Windows, mss fallback) and sent via WebRTC
+5. Mouse/keyboard events travel back via the WebRTC data channel
+6. Clipboard changes are detected by polling and synced bidirectionally
+
+### Screen sharing tips
+
+- **Bandwidth**: Use `--scale 0.5` on slow networks — halves resolution, greatly reduces bandwidth
+- **Performance**: Install `dxcam` on Windows for GPU-accelerated capture (much faster than mss)
+- **Security**: Remote input (`--input`) must be explicitly enabled on **both** host and viewer
+- **Clipboard**: Copy on either machine and paste on the other — sync happens automatically with `--clipboard`
+- **Firewall**: The relay server must be reachable (same as for text/file sharing). WebRTC may also use STUN for NAT traversal
+
+---
+
 ## Network Setup & Firewall
 
 ### Windows Firewall
@@ -326,6 +439,14 @@ python setup.py --extension        # Build Chrome extension
 # One-click server setup (one time per machine)
 python setup.py --native-host <extension-id>  # Register native host
 # Then restart Chrome — "Start Server & Connect" button appears in popup
+
+# Screen sharing
+pip install -r screen/requirements.txt              # Install dependencies (once)
+python -m screen monitors                           # List monitors
+python -m screen host -s ws://<ip>:8765             # Share your screen
+python -m screen host -s ws://<ip>:8765 --input --clipboard  # With remote control
+python -m screen view -s ws://<ip>:8765 -c <code>   # View remote screen
+python -m screen view -s ws://<ip>:8765 -c <code> --input --clipboard  # With control
 ```
 
 ### Connection checklist
@@ -336,4 +457,13 @@ python setup.py --native-host <extension-id>  # Register native host
 - [ ] Firewall allows port 8765 on **both** machines
 - [ ] Both extensions connected (green status badge)
 - [ ] Devices paired (6-digit code + emoji verification)
-- [ ] Ready to share!
+- [ ] Ready to share text and files!
+
+### Screen sharing checklist
+
+- [ ] `screen/requirements.txt` dependencies installed on both machines
+- [ ] Relay server running and reachable
+- [ ] Host started with `python -m screen host ...`
+- [ ] Viewer joined with the 6-digit code
+- [ ] (Optional) `--input` enabled on both sides for remote control
+- [ ] (Optional) `--clipboard` enabled on both sides for clipboard sync
