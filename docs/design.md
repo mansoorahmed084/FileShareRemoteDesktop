@@ -53,6 +53,7 @@ A Chrome extension + self-hosted relay server that lets you share files and text
 |-----------|------|------|
 | Relay Server | Python 3.12, FastAPI, uvicorn | Device registry, WebSocket message relay |
 | Chrome Extension | TypeScript, React 18, Vite, Tailwind | UI, crypto, file chunking, WS client |
+| Native Messaging Host | Python, Chrome Native Messaging | Start/stop server from extension with one click |
 | Encryption | Web Crypto API (browser), `cryptography` (server) | E2E encryption, key exchange |
 
 ### 2.3 Communication Protocol
@@ -76,6 +77,39 @@ Binary file chunks are sent as binary WebSocket frames with a 32-byte header:
 - Bytes 20-23: total chunks (uint32 big-endian)
 - Bytes 24-31: reserved
 - Bytes 32+: encrypted chunk data
+
+### 2.4 Native Messaging Host (One-Click Server)
+
+The extension can start/stop the relay server without a terminal via Chrome's Native Messaging API.
+
+```
+┌──────────────────────┐     stdin/stdout     ┌──────────────────────┐
+│  Chrome Extension    │  (4-byte length +    │  native_host.py      │
+│  Service Worker      │   JSON messages)     │  (short-lived)       │
+│                      │◄────────────────────►│                      │
+│  chrome.runtime      │                      │  Reads command,      │
+│  .connectNative()    │                      │  spawns/kills server │
+└──────────────────────┘                      └───────┬──────────────┘
+                                                      │
+                                              ┌───────▼──────────────┐
+                                              │  uvicorn relay       │
+                                              │  (detached process)  │
+                                              │  Survives host exit  │
+                                              │  PID → .server.pid   │
+                                              └──────────────────────┘
+```
+
+**How it works:**
+
+1. The extension sends a `start_server` command via `chrome.runtime.connectNative()`
+2. `native_host.py` spawns uvicorn as a **detached process** (`CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS` on Windows, `start_new_session=True` on Unix)
+3. The server process outlives the native host — Chrome kills the host when the service worker sleeps, but the server keeps running
+4. PID is stored in `server/.server.pid` for later stop commands
+5. The host polls `http://localhost:<port>/health` to confirm startup before responding
+
+**Message protocol:** Chrome Native Messaging uses 4-byte little-endian length prefix followed by UTF-8 JSON. Commands: `start_server`, `stop_server`, `server_status`, `ping`.
+
+**Registration:** `python setup.py --native-host <extension-id>` writes a manifest JSON and registers it in the Windows registry at `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.remotedesktop.relay`.
 
 ---
 
@@ -142,6 +176,8 @@ myRemoteDesktop/
 │   │   ├── test_hub.py
 │   │   ├── test_registry.py
 │   │   └── test_integration.py
+│   ├── native_host.py               # Chrome native messaging host (start/stop server)
+│   ├── start_host.bat               # Windows batch wrapper for native host
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── README.md

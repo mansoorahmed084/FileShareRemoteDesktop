@@ -45,7 +45,19 @@ Your server URL will be: `ws://192.168.1.42:8765` (replace with your actual IP).
 
 ## Step 2: Start the Relay Server (on one machine)
 
-### Quick start
+You have two options: start from the **extension with one click** (recommended), or from the **terminal**.
+
+### Option A: One-click start from Chrome (recommended)
+
+If you've set up the native messaging host (see [Native Host Setup](#native-host-setup) below), you can start the server directly from the extension popup:
+
+1. Click the RemoteDesktop icon in Chrome
+2. Click **Start Server & Connect**
+3. The server starts in the background and the extension connects automatically
+
+The server runs as a background process — it keeps running even if you close the popup. You can stop it from the extension's **Settings** tab.
+
+### Option B: Terminal start
 
 ```bash
 cd myRemoteDesktop
@@ -252,10 +264,54 @@ When using `--tls` with a self-signed cert, Chrome will block the WebSocket conn
 
 ---
 
+## Native Host Setup
+
+The native messaging host lets the Chrome extension start/stop the relay server with one click — no terminal needed. This is a **one-time setup** per machine.
+
+### 1. Build and load the extension first
+
+Follow Steps 3 and Load into Chrome above.
+
+### 2. Copy your extension ID
+
+1. Go to `chrome://extensions/`
+2. Find **RemoteDesktop**
+3. Copy the ID string (e.g., `galfkgdlepjdddkoojckplfmdgjiffoh`)
+
+### 3. Register the native host
+
+```bash
+python setup.py --native-host <your-extension-id>
+```
+
+This:
+- Creates the native host manifest (`server/com.remotedesktop.relay.json`)
+- Registers it in the Windows registry (or copies to the appropriate Chrome config directory on macOS/Linux)
+- Ensures the Python venv and server dependencies are installed
+
+### 4. Restart Chrome
+
+Close **all** Chrome windows and reopen Chrome. The native host won't be recognized until Chrome restarts.
+
+### 5. Test it
+
+Click the RemoteDesktop icon — you should see a **Local Server** panel with a **Start Server & Connect** button. Click it, and the server should start and the extension should connect automatically.
+
+### Troubleshooting native host
+
+| Problem | Solution |
+|---------|----------|
+| "Native host not registered" error | Re-run `python setup.py --native-host <id>` and restart Chrome |
+| Server starts but extension doesn't connect | Wait a few seconds — the host polls `/health` for up to 10s |
+| Button says "Starting..." forever | Check that Python and uvicorn are installed in the server venv |
+| Extension ID changed after reload | Re-run `python setup.py --native-host <new-id>` — the ID changes when you remove and re-add the extension |
+
+---
+
 ## Quick Reference
 
 ```bash
-# Server machine
+# Server machine (terminal)
 python setup.py                    # Install + run server
 python setup.py --tls              # Install + run with TLS
 python setup.py --run              # Run only (already installed)
@@ -266,13 +322,18 @@ python setup.py --docker           # Docker mode
 # Each client machine
 python setup.py --extension        # Build Chrome extension
 # Then load extension/dist in chrome://extensions/
+
+# One-click server setup (one time per machine)
+python setup.py --native-host <extension-id>  # Register native host
+# Then restart Chrome — "Start Server & Connect" button appears in popup
 ```
 
 ### Connection checklist
 
-- [ ] Server running and reachable (`/health` returns OK)
-- [ ] Firewall allows port 8765
 - [ ] Extension loaded in Chrome on both laptops
+- [ ] Native host registered (or server started from terminal)
+- [ ] Server running and reachable (`/health` returns OK)
+- [ ] Firewall allows port 8765 on **both** machines
 - [ ] Both extensions connected (green status badge)
 - [ ] Devices paired (6-digit code + emoji verification)
 - [ ] Ready to share!
