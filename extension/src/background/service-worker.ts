@@ -414,9 +414,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       case "download_received": {
         const blob = receivedBlobs.get(message.transferId);
         if (blob) {
-          const url = URL.createObjectURL(blob);
+          const buffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const chunkSize = 8192;
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+          }
+          const base64 = btoa(binary);
+          const mimeType = blob.type || "application/octet-stream";
           await chrome.downloads.download({
-            url,
+            url: `data:${mimeType};base64,${base64}`,
             filename: message.fileName,
             saveAs: true,
           });
