@@ -8,8 +8,9 @@ Usage:
   python setup.py --run        # Run server only (skip install)
   python setup.py --tls        # Generate TLS cert, install deps, run with TLS
   python setup.py --test       # Install deps + run tests
-  python setup.py --docker     # Build and run via Docker Compose
-  python setup.py --extension  # Build the Chrome extension
+  python setup.py --docker       # Build and run via Docker Compose
+  python setup.py --extension    # Build the Chrome extension
+  python setup.py --screen-deps  # Install screen sharing dependencies (uses Python 3.12 venv)
   python setup.py --native-host <extension-id>  # Register native messaging host
 """
 
@@ -99,6 +100,22 @@ def install_server_deps(include_test: bool = False) -> None:
     if include_test:
         run([str(PIP_BIN), "install", "pytest", "pytest-asyncio", "--quiet"])
     print("  Done")
+
+
+def install_screen_deps() -> None:
+    log("Installing screen sharing dependencies")
+    screen_req = ROOT / "screen" / "requirements.txt"
+    if not screen_req.exists():
+        print(f"  Not found: {screen_req}")
+        sys.exit(1)
+    rc = run([str(PIP_BIN), "install", "-r", str(screen_req)])
+    if rc != 0:
+        print("  Failed to install screen dependencies")
+        sys.exit(1)
+    print("  Done")
+    print(f"\n  Run screen sharing with:")
+    print(f"    {PYTHON_BIN} -m screen host -s ws://<ip>:8765")
+    print(f"    {PYTHON_BIN} -m screen view -s ws://<ip>:8765 --code <code>")
 
 
 def generate_tls_cert() -> None:
@@ -254,6 +271,7 @@ def main() -> None:
     parser.add_argument("--extension", action="store_true", help="Build Chrome extension")
     parser.add_argument("--native-host", metavar="EXTENSION_ID",
                         help="Register native messaging host (get ID from chrome://extensions)")
+    parser.add_argument("--screen-deps", action="store_true", help="Install screen sharing dependencies")
     parser.add_argument("--host", default="0.0.0.0", help="Server host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
 
@@ -265,6 +283,11 @@ def main() -> None:
         create_venv()
         install_server_deps()
         register_native_host(args.native_host)
+        return
+
+    if args.screen_deps:
+        create_venv()
+        install_screen_deps()
         return
 
     if args.docker:
