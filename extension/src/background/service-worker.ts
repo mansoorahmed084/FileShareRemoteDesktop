@@ -12,6 +12,32 @@ import { FileReceiver, type FileMetadata, type TransferProgress } from "../lib/f
 import type { WSMessage, ConnectionStatus, PairedDevice } from "../lib/types";
 
 let currentStatus: ConnectionStatus = "disconnected";
+let keepAliveEnabled = false;
+
+const KEEPALIVE_ALARM = "ws-keepalive";
+const KEEPALIVE_INTERVAL_MS = 25000; // 25s — before Chrome's 30s service worker timeout
+
+async function startKeepAlive() {
+  if (keepAliveEnabled) return;
+  keepAliveEnabled = true;
+  await chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 }); // ~24s
+}
+
+async function stopKeepAlive() {
+  keepAliveEnabled = false;
+  await chrome.alarms.clear(KEEPALIVE_ALARM);
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === KEEPALIVE_ALARM) {
+    if (wsClient.status === "disconnected" || wsClient.status === "error") {
+      const config = await getConfig();
+      if (config.autoConnect && config.serverUrl) {
+        wsClient.connect(config.serverUrl, config.deviceId, config.deviceName);
+      }
+    }
+  }
+});
 
 const pendingKeyExchange = new Map<
   string,
@@ -25,9 +51,14 @@ const receivedBlobs = new Map<string, Blob>();
 async function init() {
   const config = await getConfig();
 
-  wsClient.onStatus((status) => {
+  wsClient.onStatus(async (status) => {
     currentStatus = status;
     broadcastToExtension({ type: "status_changed", status });
+    if (status === "connected") {
+      await startKeepAlive();
+    } else if (status === "disconnected") {
+      // Don't stop keepalive on disconnect — let it try to reconnect
+    }
   });
 
   wsClient.onMessage(async (msg: WSMessage) => {
@@ -240,6 +271,7 @@ async function init() {
 
   if (config.autoConnect && config.serverUrl) {
     wsClient.connect(config.serverUrl, config.deviceId, config.deviceName);
+    await startKeepAlive();
   }
 }
 
@@ -273,12 +305,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           config.deviceId,
           config.deviceName
         );
+        await startKeepAlive();
         sendResponse({ ok: true });
         break;
       }
 
       case "disconnect":
         wsClient.disconnect();
+        await stopKeepAlive();
         sendResponse({ ok: true });
         break;
 
