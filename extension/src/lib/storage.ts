@@ -21,13 +21,14 @@ export async function getConfig(): Promise<ExtensionConfig> {
   const config = { ...DEFAULT_CONFIG, ...result.config };
   if (!config.deviceId) {
     config.deviceId = generateDeviceId();
-    await saveConfig(config);
+    await chrome.storage.local.set({ config });
   }
   return config;
 }
 
 export async function saveConfig(config: Partial<ExtensionConfig>): Promise<void> {
-  const current = await getConfig();
+  const result = await chrome.storage.local.get("config");
+  const current = { ...DEFAULT_CONFIG, ...result.config };
   await chrome.storage.local.set({ config: { ...current, ...config } });
 }
 
