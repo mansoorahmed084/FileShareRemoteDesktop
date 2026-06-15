@@ -1,4 +1,4 @@
-# RemoteDesktop
+# RemoteDesktop with secure File Sharing
 
 **Secure, encrypted device bridge for developers.** Share files, text, `.env` variables, and code snippets between your laptops instantly — no cloud, no accounts, no cost.
 
