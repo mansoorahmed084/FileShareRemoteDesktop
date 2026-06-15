@@ -127,8 +127,9 @@ python setup.py --docker            # Build and run via Docker Compose
    hostname -I | awk '{print $1}'
    ```
 
-2. Start the server on that machine: `python setup.py`
-3. On both laptops, connect the extension to `ws://192.168.1.42:8765` (replace with your IP)
+2. Open port 8765 in the firewall on **both** machines (see [Firewall rules](#firewall-rules) below)
+3. Start the server on **one** machine only: `python setup.py`
+4. On both laptops, connect the extension to `ws://192.168.1.42:8765` (replace with the server machine's IP)
 
 ### Different networks (home ↔ office)
 
@@ -138,22 +139,24 @@ python setup.py --docker            # Build and run via Docker Compose
 
 ### Firewall rules
 
-If devices can't connect, open port 8765:
+**Important:** You must open port 8765 on **both** machines — the machine running the server **and** any machine connecting to it. Without this, WebSocket connections will be silently blocked.
 
-**Windows (run as Administrator):**
+**Windows (run PowerShell as Administrator on both machines):**
 ```powershell
 New-NetFirewallRule -DisplayName "RemoteDesktop Relay" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow
 ```
 
-**macOS:**
+**macOS (on both machines):**
 ```bash
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/python3
 ```
 
-**Linux (ufw):**
+**Linux (on both machines):**
 ```bash
 sudo ufw allow 8765/tcp
 ```
+
+> **Tip:** If `ping` between machines fails but the server's `/health` endpoint responds in a browser, that's normal — Windows Firewall blocks ICMP (ping) by default. As long as the TCP port is open, the extension will connect fine.
 
 ---
 
