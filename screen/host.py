@@ -80,9 +80,32 @@ async def run_host(
 
     code = await signaling.create_pairing_code()
     print(f"\n  Pairing code: {code}")
+
+    gui = None
+    try:
+        from .pairing_gui import show_host_code
+        gui = show_host_code(code)
+    except Exception:
+        pass
+
     print("  Waiting for viewer to connect...\n")
 
-    peer_id = await signaling.wait_for_pair()
+    pair_task = asyncio.create_task(signaling.wait_for_pair())
+    while not pair_task.done():
+        if gui and gui.cancelled:
+            pair_task.cancel()
+            print("  Cancelled.")
+            capture.close()
+            await signaling.close()
+            return
+        await asyncio.sleep(0.1)
+
+    peer_id = pair_task.result()
+    if gui:
+        gui.set_connected()
+        await asyncio.sleep(0.6)
+        gui.close()
+
     print(f"  Viewer connected: {peer_id[:8]}...")
 
     config = {"iceServers": [{"urls": "stun:stun.l.google.com:19302"}]}

@@ -24,7 +24,7 @@ def main():
     view_p = sub.add_parser("view", help="View and control a remote screen")
     view_p.add_argument("--server", "-s", required=True, help="Relay server URL (ws://ip:8765)")
     view_p.add_argument("--name", "-n", default="Viewer", help="Device name")
-    view_p.add_argument("--code", "-c", required=True, help="6-digit pairing code from host")
+    view_p.add_argument("--code", "-c", default=None, help="6-digit pairing code from host (GUI prompt if omitted)")
     view_p.add_argument("--input", action="store_true", help="Send mouse/keyboard to host")
     view_p.add_argument("--clipboard", action="store_true", help="Enable clipboard sync")
 
@@ -57,11 +57,21 @@ def main():
             enable_clipboard=args.clipboard,
         ))
     elif args.command == "view":
+        code = args.code
+        if code is None:
+            try:
+                from .pairing_gui import ask_pairing_code
+                code = ask_pairing_code()
+            except Exception:
+                code = input("  Enter pairing code: ").strip()
+            if not code:
+                print("  Cancelled.")
+                sys.exit(0)
         from .viewer import run_viewer
         asyncio.run(run_viewer(
             server_url=args.server,
             device_name=args.name,
-            code=args.code,
+            code=code,
             enable_input=args.input,
             enable_clipboard=args.clipboard,
         ))
