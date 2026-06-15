@@ -77,6 +77,22 @@ def create_capture(monitor: int = 0, prefer_dxcam: bool = True):
     return cap
 
 
+def list_monitors() -> list[dict]:
+    sct = mss.mss()
+    monitors = []
+    for i, mon in enumerate(sct.monitors[1:], start=0):
+        monitors.append({
+            "index": i,
+            "width": mon["width"],
+            "height": mon["height"],
+            "left": mon["left"],
+            "top": mon["top"],
+            "primary": i == 0,
+        })
+    sct.close()
+    return monitors
+
+
 async def grab_async(capture) -> np.ndarray:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, capture.grab)

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 
 import numpy as np
 import pygame
@@ -105,15 +106,22 @@ async def run_viewer(
         return
 
     print("  Streaming! Press Esc or close window to disconnect.\n")
+    print("  Shortcuts: F11=fullscreen, Ctrl+Shift+S=toggle stats, Esc=quit\n")
 
     pygame.init()
     win_w, win_h = 1280, 720
     screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
     pygame.display.set_caption(f"RemoteDesktop — {signaling.device_name}")
     clock = pygame.time.Clock()
+    stats_font = pygame.font.SysFont("consolas", 14)
 
     fullscreen = False
+    show_stats = True
     running = True
+    frame_count = 0
+    fps_display = 0.0
+    fps_timer = time.time()
+    latency_ms = 0
 
     try:
         while running and pc.connectionState not in ("failed", "closed"):
@@ -135,6 +143,8 @@ async def run_viewer(
                         else:
                             win_w, win_h = 1280, 720
                             screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
+                    elif event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL and event.mod & pygame.KMOD_SHIFT:
+                        show_stats = not show_stats
                     elif enable_input and dc and dc.readyState == "open":
                         _send_key_event(dc, "key_down", event)
                 elif event.type == pygame.KEYUP:
@@ -162,6 +172,31 @@ async def run_viewer(
                 surface = pygame.image.frombuffer(latest_frame.tobytes(), (w, h), "RGB")
                 scaled = pygame.transform.scale(surface, (win_w, win_h))
                 screen.blit(scaled, (0, 0))
+
+                frame_count += 1
+                now = time.time()
+                if now - fps_timer >= 1.0:
+                    fps_display = frame_count / (now - fps_timer)
+                    frame_count = 0
+                    fps_timer = now
+
+                if show_stats:
+                    stats_lines = [
+                        f"FPS: {fps_display:.0f}",
+                        f"Resolution: {w}x{h}",
+                        f"Window: {win_w}x{win_h}",
+                        f"State: {pc.connectionState}",
+                    ]
+                    if enable_input:
+                        stats_lines.append(f"Input: {'on' if dc and dc.readyState == 'open' else 'off'}")
+                    if enable_clipboard:
+                        stats_lines.append("Clipboard: on")
+                    y = 8
+                    for line in stats_lines:
+                        text_surf = stats_font.render(line, True, (0, 255, 0), (0, 0, 0))
+                        screen.blit(text_surf, (8, y))
+                        y += 18
+
                 pygame.display.flip()
 
             if enable_clipboard and clipboard_monitor and dc and dc.readyState == "open":

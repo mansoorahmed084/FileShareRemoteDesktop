@@ -1,4 +1,4 @@
-"""CLI entry point — python -m screen host|view"""
+"""CLI entry point — python -m screen host|view|monitors"""
 
 import argparse
 import asyncio
@@ -17,6 +17,7 @@ def main():
     host_p.add_argument("--name", "-n", default="Host", help="Device name")
     host_p.add_argument("--fps", type=int, default=30, help="Target FPS (default: 30)")
     host_p.add_argument("--monitor", "-m", type=int, default=0, help="Monitor index (default: 0)")
+    host_p.add_argument("--scale", type=float, default=1.0, help="Resolution scale 0.25–1.0 (default: 1.0)")
     host_p.add_argument("--input", action="store_true", help="Allow remote mouse/keyboard control")
     host_p.add_argument("--clipboard", action="store_true", help="Enable clipboard sync")
 
@@ -27,19 +28,31 @@ def main():
     view_p.add_argument("--input", action="store_true", help="Send mouse/keyboard to host")
     view_p.add_argument("--clipboard", action="store_true", help="Enable clipboard sync")
 
+    sub.add_parser("monitors", help="List available monitors")
+
     args = parser.parse_args()
 
     if not args.command:
         parser.print_help()
         sys.exit(1)
 
-    if args.command == "host":
+    if args.command == "monitors":
+        from .capture import list_monitors
+        monitors = list_monitors()
+        print(f"\n  Found {len(monitors)} monitor(s):\n")
+        for mon in monitors:
+            primary = " (primary)" if mon["primary"] else ""
+            print(f"    [{mon['index']}] {mon['width']}x{mon['height']}"
+                  f" at ({mon['left']},{mon['top']}){primary}")
+        print(f"\n  Use --monitor <index> with the host command.\n")
+    elif args.command == "host":
         from .host import run_host
         asyncio.run(run_host(
             server_url=args.server,
             device_name=args.name,
             fps=args.fps,
             monitor=args.monitor,
+            scale=max(0.25, min(1.0, args.scale)),
             enable_input=args.input,
             enable_clipboard=args.clipboard,
         ))

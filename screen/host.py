@@ -4,6 +4,8 @@ import asyncio
 import fractions
 import time
 
+import cv2
+import numpy as np
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCIceCandidate
 from av import VideoFrame
 
@@ -16,13 +18,17 @@ VIDEO_CLOCK_RATE = 90000
 class ScreenCaptureTrack(VideoStreamTrack):
     kind = "video"
 
-    def __init__(self, capture, fps: int = 30):
+    def __init__(self, capture, fps: int = 30, scale: float = 1.0):
         super().__init__()
         self._capture = capture
         self._fps = fps
+        self._scale = scale
         self._ptime = 1 / fps
         self._start: float | None = None
         self._timestamp = 0
+        self.actual_fps = 0.0
+        self._frame_count = 0
+        self._fps_start = time.time()
 
     async def recv(self):
         if self._start is None:
@@ -34,9 +40,26 @@ class ScreenCaptureTrack(VideoStreamTrack):
                 await asyncio.sleep(wait)
 
         frame = await grab_async(self._capture)
+
+        if self._scale < 1.0:
+            h, w = frame.shape[:2]
+            new_w, new_h = int(w * self._scale), int(h * self._scale)
+            try:
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            except Exception:
+                frame = frame[::2, ::2]
+
         video_frame = VideoFrame.from_ndarray(frame, format="bgr24")
         video_frame.pts = self._timestamp
         video_frame.time_base = fractions.Fraction(1, VIDEO_CLOCK_RATE)
+
+        self._frame_count += 1
+        elapsed = time.time() - self._fps_start
+        if elapsed >= 1.0:
+            self.actual_fps = self._frame_count / elapsed
+            self._frame_count = 0
+            self._fps_start = time.time()
+
         return video_frame
 
 
@@ -45,6 +68,7 @@ async def run_host(
     device_name: str,
     fps: int = 30,
     monitor: int = 0,
+    scale: float = 1.0,
     enable_input: bool = False,
     enable_clipboard: bool = False,
 ):
@@ -64,8 +88,11 @@ async def run_host(
     config = {"iceServers": [{"urls": "stun:stun.l.google.com:19302"}]}
     pc = RTCPeerConnection(configuration=config)
 
-    video_track = ScreenCaptureTrack(capture, fps=fps)
+    video_track = ScreenCaptureTrack(capture, fps=fps, scale=scale)
     pc.addTrack(video_track)
+    print(f"  Streaming at {fps}fps, scale={scale}")
+    if scale < 1.0:
+        print(f"  Output resolution: {int(capture.width * scale)}x{int(capture.height * scale)}")
 
     dc = pc.createDataChannel("control", ordered=True)
     input_injector = None
