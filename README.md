@@ -8,6 +8,10 @@ Laptop A (Chrome/CLI/Agent) ◄──── WSS (E2E encrypted) ────► 
 
 RemoteDesktop is a **Chrome extension** + **CLI tool** + **MCP server** paired with a **self-hosted Python relay server**. All data is end-to-end encrypted — the server is zero-knowledge and never sees your plaintext.
 
+> **⚠️ Development Use Only**
+>
+> This tool is built for **developer workflows on trusted networks** (home lab, office LAN, personal VPS). It is **not** intended for production, enterprise, or public-facing deployment. While the encryption stack is robust, the project has not undergone a formal security audit. Use at your own risk — the authors assume no liability for data loss, exposure, or misuse. **Do not use this as your sole mechanism for transferring highly sensitive credentials in regulated environments.**
+
 ---
 
 ## Why?
@@ -532,6 +536,18 @@ After rebuilding, go to `chrome://extensions/` and click the refresh icon on Rem
 4. Run the test suite: `python setup.py --test`
 5. Build the extension: `python setup.py --extension`
 6. Submit a pull request
+
+---
+
+## Security Disclaimer
+
+This software is provided **as-is** for development and personal use. It has **not** been independently audited by a third-party security firm.
+
+- **No warranty.** The authors make no guarantees about the security, reliability, or fitness of this tool for any particular purpose.
+- **Not for production.** Do not deploy this in environments subject to compliance requirements (HIPAA, SOC 2, PCI-DSS, etc.) without a professional security review.
+- **Self-signed TLS.** The built-in certificate generator creates self-signed certs suitable for LAN use. For internet-facing deployments, use certificates from a trusted CA (e.g., Let's Encrypt).
+- **Relay trust.** While the relay server is zero-knowledge by design, whoever operates the server can observe connection metadata (device IDs, message sizes, timestamps). Self-host the relay if metadata privacy matters to you.
+- **Report vulnerabilities.** If you discover a security issue, please open a GitHub issue or contact the maintainer directly.
 
 ---
 
