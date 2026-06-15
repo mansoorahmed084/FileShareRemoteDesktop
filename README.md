@@ -94,6 +94,33 @@ You're paired. Start sharing!
 
 ---
 
+## One-Click Server (Native Messaging Host)
+
+Instead of running the server from a terminal every time, you can register a **native messaging host** that lets the Chrome extension start/stop the relay server with a single click.
+
+### Setup (one time)
+
+1. Build and load the extension first (see [Quick Start](#quick-start) steps 2–3)
+2. Copy your extension ID from `chrome://extensions/` (e.g., `abcdefghijklmnopqrstuvwxyz123456`)
+3. Register the native host:
+
+```bash
+python setup.py --native-host <your-extension-id>
+```
+
+4. Restart Chrome
+
+### Usage
+
+- Open the extension popup — the **Local Server** panel shows the server status
+- Click **Start Server & Connect** — starts the server and connects automatically
+- When connected, the Settings tab shows a **Stop** button to shut down the server
+- The server runs as a detached process — it survives even if the popup closes
+
+> **Note:** The native host requires Python and the server dependencies to be installed. `setup.py --native-host` handles the venv and deps automatically.
+
+---
+
 ## Setup Script Reference
 
 The `setup.py` script handles everything:
@@ -107,6 +134,7 @@ python setup.py --tls               # Generate self-signed cert + start with TLS
 python setup.py --test              # Install deps + run test suite
 python setup.py --extension         # Build the Chrome extension
 python setup.py --docker            # Build and run via Docker Compose
+python setup.py --native-host <id>  # Register native messaging host for one-click server
 ```
 
 ---
@@ -247,6 +275,8 @@ FileShareRemoteDesktop/
 │   │   ├── models.py           # Pydantic message schemas
 │   │   └── config.py           # Settings (env-configurable)
 │   ├── tests/                  # pytest test suite
+│   ├── native_host.py          # Native messaging host (start/stop server from Chrome)
+│   ├── start_host.bat          # Windows batch wrapper for native host
 │   ├── generate_cert.py        # Self-signed TLS cert generator
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -522,6 +552,7 @@ After rebuilding, go to `chrome://extensions/` and click the refresh icon on Rem
 
 - [x] CLI tool for terminal-based sharing
 - [x] MCP server for AI agent integration
+- [x] One-click server start/stop from Chrome extension (native messaging host)
 - [ ] Mobile companion app (React Native)
 - [ ] WebRTC peer-to-peer mode for LAN (skip relay for faster transfers)
 - [ ] Folder watching and auto-sync

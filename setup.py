@@ -10,9 +10,11 @@ Usage:
   python setup.py --test       # Install deps + run tests
   python setup.py --docker     # Build and run via Docker Compose
   python setup.py --extension  # Build the Chrome extension
+  python setup.py --native-host <extension-id>  # Register native messaging host
 """
 
 import argparse
+import json
 import os
 import platform
 import shutil
@@ -20,6 +22,9 @@ import subprocess
 import sys
 import venv
 from pathlib import Path
+
+if platform.system() == "Windows":
+    import winreg
 
 ROOT = Path(__file__).resolve().parent
 SERVER_DIR = ROOT / "server"
@@ -149,6 +154,50 @@ def build_extension() -> None:
     print(f"    4. Select: {EXTENSION_DIR / 'dist'}")
 
 
+NATIVE_HOST_NAME = "com.remotedesktop.relay"
+
+
+def register_native_host(extension_id: str) -> None:
+    log("Registering native messaging host")
+
+    bat_path = SERVER_DIR / "start_host.bat"
+    manifest_path = SERVER_DIR / f"{NATIVE_HOST_NAME}.json"
+
+    manifest = {
+        "name": NATIVE_HOST_NAME,
+        "description": "RemoteDesktop Relay Server Host",
+        "path": str(bat_path),
+        "type": "stdio",
+        "allowed_origins": [f"chrome-extension://{extension_id}/"],
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    print(f"  Manifest written: {manifest_path}")
+
+    if IS_WIN:
+        key_path = f"Software\\Google\\Chrome\\NativeMessagingHosts\\{NATIVE_HOST_NAME}"
+        try:
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, str(manifest_path))
+            winreg.CloseKey(key)
+            print(f"  Registry key set: HKCU\\{key_path}")
+        except Exception as e:
+            print(f"  Failed to set registry key: {e}")
+            sys.exit(1)
+    else:
+        if sys.platform == "darwin":
+            target = Path.home() / "Library" / "Application Support" / "Google" / "Chrome" / "NativeMessagingHosts"
+        else:
+            target = Path.home() / ".config" / "google-chrome" / "NativeMessagingHosts"
+        target.mkdir(parents=True, exist_ok=True)
+        dest = target / f"{NATIVE_HOST_NAME}.json"
+        shutil.copy2(manifest_path, dest)
+        print(f"  Manifest copied to: {dest}")
+
+    print(f"\n  Native host registered for extension: {extension_id}")
+    print("  Restart Chrome for the change to take effect.")
+    print("  The extension can now start/stop the server with one click.")
+
+
 def run_docker() -> None:
     log("Starting with Docker Compose")
     docker = shutil.which("docker")
@@ -175,12 +224,20 @@ def main() -> None:
     parser.add_argument("--test", action="store_true", help="Run server tests")
     parser.add_argument("--docker", action="store_true", help="Run via Docker Compose")
     parser.add_argument("--extension", action="store_true", help="Build Chrome extension")
+    parser.add_argument("--native-host", metavar="EXTENSION_ID",
+                        help="Register native messaging host (get ID from chrome://extensions)")
     parser.add_argument("--host", default="0.0.0.0", help="Server host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
 
     args = parser.parse_args()
 
     check_python_version()
+
+    if args.native_host:
+        create_venv()
+        install_server_deps()
+        register_native_host(args.native_host)
+        return
 
     if args.docker:
         run_docker()

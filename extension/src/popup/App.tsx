@@ -20,6 +20,9 @@ export default function App() {
   const [deviceId, setDeviceId] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("devices");
 
+  const [serverRunning, setServerRunning] = useState<boolean | null>(null);
+  const [serverStarting, setServerStarting] = useState(false);
+  const [nativeHostError, setNativeHostError] = useState<string | null>(null);
   const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -44,6 +47,10 @@ export default function App() {
 
     chrome.runtime.sendMessage({ type: "get_status" }, (res) => {
       if (res?.status) setStatus(res.status);
+    });
+
+    chrome.runtime.sendMessage({ type: "get_server_status" }, (res) => {
+      if (res) setServerRunning(res.running ?? false);
     });
 
     loadDevices();
@@ -96,6 +103,10 @@ export default function App() {
           setMessages((prev) => [...prev, newMsg]);
           break;
         }
+        case "server_status":
+          setServerRunning(message.running as boolean);
+          setServerStarting(false);
+          break;
         case "transfer_update":
           setTransfers((prev) => {
             const t = message.transfer as TransferProgress;
@@ -117,6 +128,56 @@ export default function App() {
   const handleConnect = async () => {
     await saveConfig({ serverUrl, deviceName });
     chrome.runtime.sendMessage({ type: "connect", serverUrl });
+  };
+
+  const handleStartServer = () => {
+    setServerStarting(true);
+    setNativeHostError(null);
+    chrome.runtime.sendMessage({ type: "start_server", port: 8765 }, (res) => {
+      if (res?.type === "error") {
+        setServerStarting(false);
+        setNativeHostError(
+          res.message?.includes("not found") || res.message?.includes("Specified native messaging host not found")
+            ? "Native host not registered. Run: python setup.py --native-host <extension-id>"
+            : res.message
+        );
+      } else if (res?.running) {
+        setServerRunning(true);
+        setServerStarting(false);
+        if (!serverUrl || serverUrl === "ws://localhost:8765") {
+          setServerUrl("ws://localhost:8765");
+        }
+      }
+    });
+  };
+
+  const handleStartAndConnect = async () => {
+    setServerStarting(true);
+    setNativeHostError(null);
+    chrome.runtime.sendMessage({ type: "start_server", port: 8765 }, async (res) => {
+      setServerStarting(false);
+      if (res?.type === "error") {
+        setNativeHostError(
+          res.message?.includes("not found") || res.message?.includes("Specified native messaging host not found")
+            ? "Native host not registered. Run: python setup.py --native-host <extension-id>"
+            : res.message
+        );
+        return;
+      }
+      if (res?.running) {
+        setServerRunning(true);
+        const url = "ws://localhost:8765";
+        setServerUrl(url);
+        await saveConfig({ serverUrl: url, deviceName });
+        chrome.runtime.sendMessage({ type: "connect", serverUrl: url });
+      }
+    });
+  };
+
+  const handleStopServer = () => {
+    chrome.runtime.sendMessage({ type: "stop_server" }, () => {
+      setServerRunning(false);
+    });
   };
 
   const handleDisconnect = () => {
@@ -207,6 +268,48 @@ export default function App() {
 
       {status !== "connected" ? (
         <div className="p-4 space-y-3">
+          {/* Local Server Control */}
+          <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Local Server</span>
+              <span className={`inline-flex items-center gap-1 text-xs font-medium ${
+                serverRunning === null ? "text-gray-400" : serverRunning ? "text-green-600 dark:text-green-400" : "text-gray-400"
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  serverRunning === null ? "bg-gray-300" : serverRunning ? "bg-green-500" : "bg-gray-300"
+                }`} />
+                {serverRunning === null ? "Checking..." : serverRunning ? "Running" : "Stopped"}
+              </span>
+            </div>
+
+            {!serverRunning && (
+              <button
+                onClick={handleStartAndConnect}
+                disabled={serverStarting}
+                className="w-full py-2 px-4 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {serverStarting ? "Starting..." : "Start Server & Connect"}
+              </button>
+            )}
+            {serverRunning && (
+              <button
+                onClick={handleStopServer}
+                className="w-full py-1.5 px-3 text-xs font-medium text-red-600 hover:text-red-700 border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+              >
+                Stop Server
+              </button>
+            )}
+            {nativeHostError && (
+              <p className="text-xs text-red-500 break-words">{nativeHostError}</p>
+            )}
+          </div>
+
+          <div className="relative flex items-center">
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-700" />
+            <span className="px-2 text-xs text-gray-400">or connect to remote server</span>
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-700" />
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
               Server URL
@@ -368,6 +471,20 @@ export default function App() {
                 <div className="text-xs text-gray-400">
                   Server: {serverUrl}
                 </div>
+                {serverRunning && (
+                  <div className="flex items-center justify-between p-2 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                      Local server running
+                    </span>
+                    <button
+                      onClick={handleStopServer}
+                      className="text-xs text-red-500 hover:text-red-600"
+                    >
+                      Stop
+                    </button>
+                  </div>
+                )}
                 <button
                   onClick={handleDisconnect}
                   className="w-full py-2 px-4 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"

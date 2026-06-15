@@ -13,6 +13,41 @@ import type { WSMessage, ConnectionStatus, PairedDevice } from "../lib/types";
 
 let currentStatus: ConnectionStatus = "disconnected";
 let keepAliveEnabled = false;
+let serverRunning = false;
+
+const NATIVE_HOST = "com.remotedesktop.relay";
+
+function nativeCommand(cmd: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return new Promise((resolve) => {
+    const port = chrome.runtime.connectNative(NATIVE_HOST);
+    let responded = false;
+
+    port.onMessage.addListener((msg: Record<string, unknown>) => {
+      responded = true;
+      resolve(msg);
+      port.disconnect();
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (!responded) {
+        const err = chrome.runtime.lastError?.message || "Native host not found";
+        resolve({ type: "error", message: err });
+      }
+    });
+
+    port.postMessage(cmd);
+  });
+}
+
+async function checkServerStatus(port = 8765): Promise<boolean> {
+  try {
+    const resp = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(2000) });
+    serverRunning = resp.ok;
+  } catch {
+    serverRunning = false;
+  }
+  return serverRunning;
+}
 
 const KEEPALIVE_ALARM = "ws-keepalive";
 const KEEPALIVE_INTERVAL_MS = 25000; // 25s — before Chrome's 30s service worker timeout
@@ -454,6 +489,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         await initiateKeyExchange(message.device_id);
         sendResponse({ ok: true });
         break;
+
+      case "start_server": {
+        const result = await nativeCommand({
+          type: "start_server",
+          port: message.port || 8765,
+        });
+        if (result.running) {
+          serverRunning = true;
+          broadcastToExtension({ type: "server_status", running: true, port: result.port });
+        }
+        sendResponse(result);
+        break;
+      }
+
+      case "stop_server": {
+        const result = await nativeCommand({ type: "stop_server" });
+        serverRunning = false;
+        broadcastToExtension({ type: "server_status", running: false });
+        wsClient.disconnect();
+        sendResponse(result);
+        break;
+      }
+
+      case "get_server_status": {
+        const running = await checkServerStatus(message.port || 8765);
+        sendResponse({ type: "server_status", running });
+        break;
+      }
 
       default:
         sendResponse({ error: "Unknown message type" });
