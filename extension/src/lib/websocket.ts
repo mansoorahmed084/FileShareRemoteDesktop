@@ -34,7 +34,7 @@ export class WebSocketClient {
   }
 
   connect(url: string, deviceId: string, deviceName: string): void {
-    this.url = url;
+    this.url = url.trim().replace(/\/+$/, "");
     this.deviceId = deviceId;
     this.deviceName = deviceName;
     this.reconnectAttempts = 0;
